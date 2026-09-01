@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - '5436:5432'
+    environment:
+      POSTGRES_DB: conduit-db
+      POSTGRES_USER: job
+      POSTGRES_PASSWORD: protection
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U job -d conduit-db']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:alpine
+    container_name: conduit-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
