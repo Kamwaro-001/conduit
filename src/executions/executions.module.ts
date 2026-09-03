@@ -8,6 +8,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Node } from '../workflows/entities/node.entity.js';
 import { Edge } from '../workflows/entities/edge.entity.js';
 import { Workflow } from '../workflows/entities/workflow.entity.js';
+import { ExecutionLog } from './entities/execution-log.entity.js';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { Workflow } from '../workflows/entities/workflow.entity.js';
     BullModule.registerQueue({
       name: 'node-execution',
     }),
-    TypeOrmModule.forFeature([Workflow, Node, Edge]),
+    TypeOrmModule.forFeature([Workflow, Node, Edge, ExecutionLog]),
   ],
   controllers: [WebhooksController],
   providers: [ExecutionsService, GraphTraversalService, NodeProcessor],
