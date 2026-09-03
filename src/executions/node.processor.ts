@@ -8,6 +8,7 @@ import { GraphTraversalService } from './graph-traversal.service.js';
 import { ExecutionsService } from './executions.service.js';
 import { Edge } from '../workflows/entities/edge.entity.js';
 import { ExecutionLog } from './entities/execution-log.entity.js';
+import { ExecutionsGateway } from './executions.gateway.js';
 
 // the worker - listens to Redis, grabs the jobs, executes the actual work.
 @Processor('node-execution')
@@ -21,14 +22,18 @@ export class NodeProcessor extends WorkerHost {
     private readonly logsRepo: Repository<ExecutionLog>,
     private readonly traversalService: GraphTraversalService,
     private readonly executionsService: ExecutionsService,
+    private readonly gateway: ExecutionsGateway,
   ) {
     super();
   }
 
-  // BullMQ automatically calls this method whenever a job hits the queue
-  // process: fetch node from db for type and config,
-  // run the task, e.g send email, wait, check condition, etc.
-  // use GraphTraversalService to find the next nodes, and call dispatchNode() for the next steps.
+  /*
+   * BullMQ automatically calls this method whenever a job hits the queue.
+   * Process: fetch node from db for type and config,
+   * run the task, e.g send email, wait, check condition, etc.
+   * Use GraphTraversalService to find the next nodes, and call dispatchNode() for the next steps.
+   */
+
   async process(job: Job): Promise<any> {
     const { nodeId, workflowId, inputPayload } = job.data;
 
@@ -37,6 +42,8 @@ export class NodeProcessor extends WorkerHost {
       node: { id: nodeId },
       status: 'RUNNING',
     });
+    // save RUNNING to db
+    this.gateway.broadcastNodeStatus(workflowId, nodeId, 'RUNNING');
 
     try {
       // fetch the specific node.
@@ -120,6 +127,8 @@ export class NodeProcessor extends WorkerHost {
         );
       }
 
+      // save SUCCESS to db
+      this.gateway.broadcastNodeStatus(workflowId, nodeId, 'SUCCESS');
       return { success: true };
     } catch (error: any) {
       // why did the workflow stop?
@@ -130,6 +139,9 @@ export class NodeProcessor extends WorkerHost {
         completed_at: new Date(),
         error_message: error.message,
       });
+      // save FAILED to db
+      this.gateway.broadcastNodeStatus(workflowId, nodeId, 'FAILED');
+
       // rethrow to tell BullMQ that this job failed, so it can retry if configured.
       throw error;
     }

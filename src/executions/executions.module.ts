@@ -9,6 +9,7 @@ import { Node } from '../workflows/entities/node.entity.js';
 import { Edge } from '../workflows/entities/edge.entity.js';
 import { Workflow } from '../workflows/entities/workflow.entity.js';
 import { ExecutionLog } from './entities/execution-log.entity.js';
+import { ExecutionsGateway } from './executions.gateway.js';
 
 @Module({
   imports: [
@@ -19,7 +20,12 @@ import { ExecutionLog } from './entities/execution-log.entity.js';
     TypeOrmModule.forFeature([Workflow, Node, Edge, ExecutionLog]),
   ],
   controllers: [WebhooksController],
-  providers: [ExecutionsService, GraphTraversalService, NodeProcessor],
+  providers: [
+    ExecutionsService,
+    GraphTraversalService,
+    NodeProcessor,
+    ExecutionsGateway,
+  ],
   exports: [ExecutionsService],
 })
 export class ExecutionsModule {}

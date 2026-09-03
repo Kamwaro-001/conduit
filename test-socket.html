@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Socket.io Test</title>
+    <!-- Load the Socket.io client library from a CDN -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  </head>
+  <body>
+    <h2>Check your browser console (F12)</h2>
+    <ul id="logs"></ul>
+
+    <script>
+      // Connect to your NestJS backend
+      const socket = io('http://localhost:3000');
+
+      socket.on('connect', () => {
+        console.log('✅ Connected to WebSocket Gateway');
+        document.getElementById('logs').innerHTML +=
+          '<li>✅ Connected to backend</li>';
+      });
+
+      // Listen for the exact event we created in ExecutionsGateway
+      socket.on('node_status', (data) => {
+        console.log('🔥 NEW EVENT:', data);
+
+        const logEntry = `<li>Node <b>${data.nodeId}</b> changed to <b>${data.status}</b> at ${data.timestamp}</li>`;
+        document.getElementById('logs').innerHTML += logEntry;
+      });
+    </script>
+  </body>
+</html>
