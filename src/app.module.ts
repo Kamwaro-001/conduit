@@ -5,6 +5,8 @@ import { WorkflowsModule } from './workflows/workflows.module.js';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ExecutionsModule } from './executions/executions.module.js';
 import { BullModule } from '@nestjs/bullmq';
+import { UsersModule } from './users/users.module.js';
+import { AuthModule } from './auth/auth.module.js';
 
 @Module({
   imports: [
@@ -24,6 +26,8 @@ import { BullModule } from '@nestjs/bullmq';
         port: 6379,
       },
     }),
+    UsersModule,
+    AuthModule,
     WorkflowsModule,
     ExecutionsModule,
   ],

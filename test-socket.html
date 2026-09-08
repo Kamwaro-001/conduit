@@ -17,13 +17,18 @@
         console.log('✅ Connected to WebSocket Gateway');
         document.getElementById('logs').innerHTML +=
           '<li>✅ Connected to backend</li>';
+
+        // Join the room for the workflow you want to monitor
+        const workflowId = 'YOUR_WORKFLOW_ID';
+        socket.emit('subscribe_workflow', workflowId);
+        console.log(`📡 Subscribed to workflow ${workflowId}`);
       });
 
       // Listen for the exact event we created in ExecutionsGateway
       socket.on('node_status', (data) => {
         console.log('🔥 NEW EVENT:', data);
 
-        const logEntry = `<li>Node <b>${data.nodeId}</b> changed to <b>${data.status}</b> at ${data.timestamp}</li>`;
+        const logEntry = `<li>Node <b>${data.nodeId}</b> changed to <b>${data.status}</b> — ${data.duration}ms</li>`;
         document.getElementById('logs').innerHTML += logEntry;
       });
     </script>

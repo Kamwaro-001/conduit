@@ -1,25 +1,25 @@
 import { WorkflowStatus } from '../dto/update-workflow.dto.js';
 import {
   Column,
+  CreateDateColumn,
   Entity,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
-  PrimaryColumn,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import type { Node } from './node.entity.js';
 import type { Edge } from './edge.entity.js';
+import type { User } from '../../users/entities/user.entity.js';
 
-@Entity('edges')
+@Entity('workflows')
 export class Workflow {
-  // uuid
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  // name of the action, e.g "customer onboarding sequence"
   @Column()
   name: string;
 
-  // trigger to run only published workflows
   @Column({
     type: 'enum',
     enum: WorkflowStatus,
@@ -27,8 +27,12 @@ export class Workflow {
   })
   status: WorkflowStatus;
 
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn()
   createdAt: Date;
+
+  @ManyToOne('User', 'workflows', { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'user_id' })
+  user: User;
 
   @OneToMany('Node', 'workflow', { cascade: true })
   nodes: Node[];

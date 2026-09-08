@@ -42,8 +42,12 @@ export class NodeProcessor extends WorkerHost {
       node: { id: nodeId },
       status: 'RUNNING',
     });
+
+    const startTime = Date.now();
+    let durationMs = 0;
+
     // save RUNNING to db
-    this.gateway.broadcastNodeStatus(workflowId, nodeId, 'RUNNING');
+    this.gateway.broadcastNodeStatus(workflowId, nodeId, 'RUNNING', 0);
 
     try {
       // fetch the specific node.
@@ -94,6 +98,8 @@ export class NodeProcessor extends WorkerHost {
           this.logger.warn(`Unknown node type: ${node.type}`);
       }
 
+      durationMs = Date.now() - startTime;
+
       // mark as success if nothing crashed
       await this.logsRepo.update(log.id, {
         status: 'SUCCESS',
@@ -128,7 +134,7 @@ export class NodeProcessor extends WorkerHost {
       }
 
       // save SUCCESS to db
-      this.gateway.broadcastNodeStatus(workflowId, nodeId, 'SUCCESS');
+      this.gateway.broadcastNodeStatus(workflowId, nodeId, 'SUCCESS', durationMs);
       return { success: true };
     } catch (error: any) {
       // why did the workflow stop?
@@ -139,8 +145,9 @@ export class NodeProcessor extends WorkerHost {
         completed_at: new Date(),
         error_message: error.message,
       });
+      durationMs = Date.now() - startTime;
       // save FAILED to db
-      this.gateway.broadcastNodeStatus(workflowId, nodeId, 'FAILED');
+      this.gateway.broadcastNodeStatus(workflowId, nodeId, 'FAILED', durationMs);
 
       // rethrow to tell BullMQ that this job failed, so it can retry if configured.
       throw error;
