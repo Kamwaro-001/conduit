@@ -12,7 +12,7 @@ import { NodeType } from '../entities/node.entity.js';
 import { Type } from 'class-transformer';
 
 class NodeDto {
-  @IsUUID()
+  @IsString()
   id: string;
 
   @IsEnum(NodeType)
@@ -26,7 +26,7 @@ class NodeDto {
 }
 
 class EdgeDto {
-  @IsUUID()
+  @IsString()
   id: string;
 
   @IsString()
