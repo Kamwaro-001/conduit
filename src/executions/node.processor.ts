@@ -66,17 +66,59 @@ export class NodeProcessor extends WorkerHost {
         case NodeType.TRIGGER:
           this.logger.log(`Trigger node started execution.`);
           break;
+        // improved condition node logic.
         case NodeType.CONDITION:
-          // e.g if payload.amount > 100 follow the 'true' path
-          const field = node.config.field as string;
-          const threshold = node.config.threshold as number;
+          const rules = node.config.rules || [];
+          const matchType = node.config.matchType || 'AND';
 
-          if (inputPayload && inputPayload[field] > threshold) {
-            sourceHandle = 'true';
+          let conditionMet = false;
+
+          if (rules.length === 0) {
+            // Default to true if no rules are defined, or false if you prefer strictness
+            conditionMet = true;
           } else {
-            sourceHandle = 'false';
+            const evaluations = rules.map((rule: any) => {
+              // Clean the field name (remove "payload." if the user typed it)
+              const fieldName = rule.field.replace(/^payload\./, '');
+              const actualValue = inputPayload
+                ? inputPayload[fieldName]
+                : undefined;
+
+              // Coerce the rule value to a number if possible for accurate >= comparisons
+              const expectedValue = isNaN(Number(rule.value))
+                ? rule.value
+                : Number(rule.value);
+
+              // 3. Evaluate the operator
+              switch (rule.operator) {
+                case '>=':
+                  return Number(actualValue) >= Number(expectedValue);
+                case '==':
+                  // Using loose equality so 100 == "100" evaluates correctly from text inputs
+                  return actualValue == expectedValue;
+                case '!=':
+                  return actualValue != expectedValue;
+                case 'contains':
+                  return String(actualValue)
+                    .toLowerCase()
+                    .includes(String(expectedValue).toLowerCase());
+                default:
+                  return false;
+              }
+            });
+
+            // Apply the Match Type
+            if (matchType === 'AND') {
+              conditionMet = evaluations.every((res: boolean) => res === true);
+            } else if (matchType === 'OR') {
+              conditionMet = evaluations.some((res: boolean) => res === true);
+            }
           }
-          this.logger.log(`Condition evaluated to: ${sourceHandle}`);
+
+          sourceHandle = conditionMet ? 'true' : 'false';
+          this.logger.log(
+            `Condition evaluated to: ${sourceHandle} (Match: ${matchType}, Rules: ${rules.length})`,
+          );
           break;
         case NodeType.DELAY:
           // log delay
@@ -134,7 +176,12 @@ export class NodeProcessor extends WorkerHost {
       }
 
       // save SUCCESS to db
-      this.gateway.broadcastNodeStatus(workflowId, nodeId, 'SUCCESS', durationMs);
+      this.gateway.broadcastNodeStatus(
+        workflowId,
+        nodeId,
+        'SUCCESS',
+        durationMs,
+      );
       return { success: true };
     } catch (error: any) {
       // why did the workflow stop?
@@ -147,7 +194,12 @@ export class NodeProcessor extends WorkerHost {
       });
       durationMs = Date.now() - startTime;
       // save FAILED to db
-      this.gateway.broadcastNodeStatus(workflowId, nodeId, 'FAILED', durationMs);
+      this.gateway.broadcastNodeStatus(
+        workflowId,
+        nodeId,
+        'FAILED',
+        durationMs,
+      );
 
       // rethrow to tell BullMQ that this job failed, so it can retry if configured.
       throw error;
