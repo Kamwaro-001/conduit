@@ -28,5 +28,5 @@ export class Node {
   config: Record<string, any>;
 
   @Column({ type: 'jsonb', default: {} })
-  uiPosition: { x: number; y: number };
+  ui_position: { x: number; y: number };
 }
