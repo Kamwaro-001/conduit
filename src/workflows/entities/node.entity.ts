@@ -3,10 +3,13 @@ import type { Workflow } from './workflow.entity.js';
 
 export enum NodeType {
   TRIGGER = 'TRIGGER',
+  SCHEDULE = 'SCHEDULE',
   DELAY = 'DELAY',
   EMAIL = 'EMAIL',
   CONDITION = 'CONDITION',
   WEBHOOK = 'WEBHOOK',
+  HTTP_FETCH = 'HTTP_FETCH',
+  VISION = 'VISION',
 }
 
 @Entity('nodes')

@@ -207,6 +207,118 @@ export class NodeProcessor extends WorkerHost {
           break;
         }
 
+        case NodeType.SCHEDULE: {
+          // Entry point for cron-triggered workflows. Behaves like TRIGGER.
+          this.logger.log(`⏰ Schedule node fired.`);
+          resultPayload = {
+            triggered_at: new Date().toISOString(),
+            source: 'schedule',
+          };
+          break;
+        }
+
+        case NodeType.HTTP_FETCH: {
+          const fetchUrl: string = node.config.url;
+          if (!fetchUrl)
+            throw new Error('HTTP_FETCH node is missing config.url');
+
+          const fetchMethod: string = (
+            node.config.method ?? 'GET'
+          ).toUpperCase();
+          const fetchHeaders: Record<string, string> =
+            node.config.headers ?? {};
+
+          this.logger.log(`🌐 HTTP_FETCH: ${fetchMethod} ${fetchUrl}`);
+
+          const fetchStart = Date.now();
+          const fetchResponse = await fetch(fetchUrl, {
+            method: fetchMethod,
+            headers: { Accept: 'application/json', ...fetchHeaders },
+            ...(fetchMethod !== 'GET' && fetchMethod !== 'HEAD'
+              ? { body: JSON.stringify(inputPayload) }
+              : {}),
+          });
+
+          if (!fetchResponse.ok) {
+            throw new Error(
+              `HTTP_FETCH to ${fetchUrl} responded with HTTP ${fetchResponse.status}`,
+            );
+          }
+
+          const contentType = fetchResponse.headers.get('content-type') ?? '';
+          const responseData = contentType.includes('application/json')
+            ? await fetchResponse.json()
+            : await fetchResponse.text();
+
+          this.logger.log(
+            `✅ HTTP_FETCH succeeded: HTTP ${fetchResponse.status} in ${Date.now() - fetchStart}ms`,
+          );
+          resultPayload = {
+            url: fetchUrl,
+            method: fetchMethod,
+            httpStatus: fetchResponse.status,
+            durationMs: Date.now() - fetchStart,
+            data: responseData,
+          };
+          break;
+        }
+
+        case NodeType.VISION: {
+          // Resolve the image URL from the payload using dot notation.
+          // e.g. imageUrlField: "node-http-fetch.data.url"
+          const imageUrlField: string =
+            node.config.imageUrlField ?? 'image_url';
+          const imageUrl = this.resolvePayloadField(
+            inputPayload,
+            imageUrlField,
+          );
+
+          if (!imageUrl || typeof imageUrl !== 'string') {
+            throw new Error(
+              `VISION node: no image URL found at payload field "${imageUrlField}"`,
+            );
+          }
+
+          const prompt: string =
+            node.config.prompt ??
+            'Extract all text from this image exactly as it appears. Return only the raw text content, nothing else.';
+
+          this.logger.log(`👁️  VISION: fetching image from ${imageUrl}`);
+
+          // Fetch the image and convert to base64 for the Gemini API.
+          const imgResponse = await fetch(imageUrl);
+          if (!imgResponse.ok) {
+            throw new Error(
+              `VISION node: failed to fetch image (HTTP ${imgResponse.status})`,
+            );
+          }
+          const imgBuffer = await imgResponse.arrayBuffer();
+          const imgBase64 = Buffer.from(imgBuffer).toString('base64');
+          const mimeType =
+            imgResponse.headers.get('content-type') ?? 'image/jpeg';
+
+          // Dynamically import so the module is only loaded when needed.
+          const { GoogleGenerativeAI } = await import('@google/generative-ai');
+          const genAI = new GoogleGenerativeAI(
+            process.env.GEMINI_API_KEY ?? '',
+          );
+          const model = genAI.getGenerativeModel({
+            model: node.config.model ?? 'gemini-1.5-flash',
+          });
+
+          const visionResult = await model.generateContent([
+            { inlineData: { data: imgBase64, mimeType } },
+            prompt,
+          ]);
+
+          const extractedText = visionResult.response.text();
+          this.logger.log(
+            `✅ VISION extracted ${extractedText.length} chars of text`,
+          );
+          resultPayload = { imageUrl, extractedText };
+          break;
+        }
+
         default:
           this.logger.warn(`Unknown node type: ${node.type}`);
       }
@@ -281,5 +393,19 @@ export class NodeProcessor extends WorkerHost {
       // rethrow to tell BullMQ that this job failed, so it can retry if configured.
       throw error;
     }
+  }
+
+  /**
+   * Traverse a dot-notation path into a nested payload object.
+   * Example: resolvePayloadField(payload, "node-abc.data.media_url")
+   * returns payload["node-abc"]["data"]["media_url"]
+   */
+  private resolvePayloadField(
+    payload: Record<string, any>,
+    fieldPath: string,
+  ): unknown {
+    return fieldPath
+      .split('.')
+      .reduce((obj: any, key: string) => obj?.[key], payload);
   }
 }

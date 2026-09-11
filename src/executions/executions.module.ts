@@ -15,6 +15,7 @@ import { ExecutionLog } from './entities/execution-log.entity.js';
 import { ExecutionsGateway } from './executions.gateway.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { MailService } from '../mail/mail.service.js';
+import { SchedulerService } from './scheduler.service.js';
 
 @Module({
   imports: [
@@ -32,7 +33,8 @@ import { MailService } from '../mail/mail.service.js';
     NodeProcessor,
     ExecutionsGateway,
     MailService,
+    SchedulerService,
   ],
-  exports: [ExecutionsService],
+  exports: [ExecutionsService, SchedulerService],
 })
 export class ExecutionsModule {}

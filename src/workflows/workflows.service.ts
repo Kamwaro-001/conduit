@@ -4,13 +4,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CreateWorkflowDto } from './dto/create-workflow.dto.js';
-import { UpdateWorkflowDto } from './dto/update-workflow.dto.js';
+import {
+  UpdateWorkflowDto,
+  WorkflowStatus,
+} from './dto/update-workflow.dto.js';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Workflow } from './entities/workflow.entity.js';
 import { Repository } from 'typeorm';
 import { Node } from './entities/node.entity.js';
 import { Edge } from './entities/edge.entity.js';
 import { SyncWorkflowDto } from './dto/sync-workflow.dto.js';
+import { SchedulerService } from '../executions/scheduler.service.js';
 
 @Injectable()
 export class WorkflowsService {
@@ -21,6 +25,7 @@ export class WorkflowsService {
     private readonly nodesRepo: Repository<Node>,
     @InjectRepository(Edge)
     private readonly edgesRepo: Repository<Edge>,
+    private readonly schedulerService: SchedulerService,
   ) {}
 
   create(dto: CreateWorkflowDto, userId: string) {
@@ -40,23 +45,41 @@ export class WorkflowsService {
       where: { id },
       relations: { nodes: true, edges: true, user: true },
     });
-    if (!workflow)
-      throw new NotFoundException(`Workflow ${id} not found`);
-    if (workflow.user.id !== userId)
-      throw new ForbiddenException();
+    if (!workflow) throw new NotFoundException(`Workflow ${id} not found`);
+    if (workflow.user.id !== userId) throw new ForbiddenException();
     return workflow;
   }
 
   async update(id: string, dto: UpdateWorkflowDto, userId: string) {
     await this.assertOwner(id, userId);
     const workflow = await this.workflowsRepo.preload({ id, ...dto });
-    if (!workflow)
-      throw new NotFoundException(`Workflow ${id} not found`);
-    return this.workflowsRepo.save(workflow);
+    if (!workflow) throw new NotFoundException(`Workflow ${id} not found`);
+    const saved = await this.workflowsRepo.save(workflow);
+
+    // Sync scheduled jobs whenever the status changes.
+    if (dto.status) {
+      // Load nodes to pass to the scheduler.
+      const full = await this.workflowsRepo.findOne({
+        where: { id },
+        relations: { nodes: true },
+      });
+      if (full) {
+        if (dto.status === WorkflowStatus.PUBLISHED) {
+          await this.schedulerService.register(full);
+        } else {
+          // DRAFT or ARCHIVED — remove any active schedules.
+          await this.schedulerService.deregisterAll(id);
+        }
+      }
+    }
+
+    return saved;
   }
 
   async remove(id: string, userId: string) {
     await this.assertOwner(id, userId);
+    // Clean up any scheduled jobs before deleting.
+    await this.schedulerService.deregisterAll(id);
     const result = await this.workflowsRepo.delete(id);
     if (result.affected === 0)
       throw new NotFoundException(`Workflow ${id} not found`);
@@ -85,6 +108,14 @@ export class WorkflowsService {
     ]);
 
     return this.findOne(id, userId);
+    const updated = await this.findOne(id, userId);
+
+    // Re-register schedules after sync in case cron expressions changed.
+    if (updated.status === WorkflowStatus.PUBLISHED) {
+      await this.schedulerService.register(updated);
+    }
+
+    return updated;
   }
 
   // Shared ownership check used by mutating methods
