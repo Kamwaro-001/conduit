@@ -9,6 +9,7 @@ import { ExecutionsService } from './executions.service.js';
 import { Edge } from '../workflows/entities/edge.entity.js';
 import { ExecutionLog } from './entities/execution-log.entity.js';
 import { ExecutionsGateway } from './executions.gateway.js';
+import { MailService } from '../mail/mail.service.js';
 
 // the worker - listens to Redis, grabs the jobs, executes the actual work.
 @Processor('node-execution')
@@ -23,6 +24,7 @@ export class NodeProcessor extends WorkerHost {
     private readonly traversalService: GraphTraversalService,
     private readonly executionsService: ExecutionsService,
     private readonly gateway: ExecutionsGateway,
+    private readonly mailService: MailService,
   ) {
     super();
   }
@@ -46,35 +48,40 @@ export class NodeProcessor extends WorkerHost {
     const startTime = Date.now();
     let durationMs = 0;
 
-    // save RUNNING to db
     this.gateway.broadcastNodeStatus(workflowId, nodeId, 'RUNNING', 0);
 
     try {
-      // fetch the specific node.
       const node = await this.nodesRepo.findOneBy({ id: nodeId });
-
-      let sourceHandle: string | undefined = undefined;
 
       if (!node) {
         this.logger.error(`Node with id ${nodeId} not found`);
         return;
       }
+
       this.logger.log(`[EXECUTING] Node: ${node.type} | ID: ${nodeId}`);
+
+      let sourceHandle: string | undefined = undefined;
+      let resultPayload: Record<string, unknown> = {};
 
       // execute logic based on Node type.
       switch (node.type) {
-        case NodeType.TRIGGER:
+        case NodeType.TRIGGER: {
           this.logger.log(`Trigger node started execution.`);
+          resultPayload = {
+            triggered_at: new Date().toISOString(),
+            payload_keys: inputPayload ? Object.keys(inputPayload) : [],
+          };
           break;
-        // improved condition node logic.
-        case NodeType.CONDITION:
+        }
+
+        case NodeType.CONDITION: {
           const rules = node.config.rules || [];
           const matchType = node.config.matchType || 'AND';
 
           let conditionMet = false;
 
           if (rules.length === 0) {
-            // Default to true if no rules are defined, or false if you prefer strictness
+            // Default to true if no rules are defined
             conditionMet = true;
           } else {
             const evaluations = rules.map((rule: any) => {
@@ -89,7 +96,6 @@ export class NodeProcessor extends WorkerHost {
                 ? rule.value
                 : Number(rule.value);
 
-              // 3. Evaluate the operator
               switch (rule.operator) {
                 case '>=':
                   return Number(actualValue) >= Number(expectedValue);
@@ -107,7 +113,6 @@ export class NodeProcessor extends WorkerHost {
               }
             });
 
-            // Apply the Match Type
             if (matchType === 'AND') {
               conditionMet = evaluations.every((res: boolean) => res === true);
             } else if (matchType === 'OR') {
@@ -119,22 +124,88 @@ export class NodeProcessor extends WorkerHost {
           this.logger.log(
             `Condition evaluated to: ${sourceHandle} (Match: ${matchType}, Rules: ${rules.length})`,
           );
+          resultPayload = {
+            conditionMet,
+            matchType,
+            rulesEvaluated: rules.length,
+            branch: sourceHandle,
+          };
           break;
-        case NodeType.DELAY:
-          // log delay
+        }
+
+        case NodeType.DELAY: {
+          const delayMs = Number(node.config.delay_ms ?? 0);
           this.logger.log(
-            `⏳ Delay node reached. Pausing for ${node.config.delay_ms}ms.`,
+            `⏳ Delay node reached. Next nodes will be queued with ${delayMs}ms delay.`,
           );
+          resultPayload = { delayed_ms: delayMs };
           break;
-        case NodeType.EMAIL:
-          // mock email send.
+        }
+
+        case NodeType.EMAIL: {
+          const recipient: string =
+            node.config.recipient || 'default@example.com';
+          const subject: string =
+            node.config.subject || 'Notification from Conduit';
+          const body: string =
+            node.config.body ||
+            `<p>This email was triggered by your Conduit workflow.</p>`;
+
+          this.logger.log(`Sending email to: ${recipient}`);
+
+          const { messageId } = await this.mailService.sendEmail({
+            to: recipient,
+            subject,
+            html: body,
+          });
+
+          this.logger.log(`Email delivered | messageId: ${messageId}`);
+          resultPayload = { recipient, subject, messageId };
+          break;
+        }
+
+        case NodeType.WEBHOOK: {
+          const url: string = node.config.url;
+          if (!url) throw new Error('WEBHOOK node is missing config.url');
+
+          const method: string = (node.config.method ?? 'POST').toUpperCase();
+          const customHeaders: Record<string, string> =
+            node.config.headers ?? {};
+
+          this.logger.log(`Outbound webhook: ${method} ${url}`);
+
+          const webhookStart = Date.now();
+          const response = await fetch(url, {
+            method,
+            headers: {
+              'Content-Type': 'application/json',
+              ...customHeaders,
+            },
+            // Only attach a body for methods that support it
+            ...(method !== 'GET' && method !== 'HEAD'
+              ? { body: JSON.stringify(inputPayload) }
+              : {}),
+          });
+
+          const webhookDurationMs = Date.now() - webhookStart;
+
+          if (!response.ok) {
+            throw new Error(
+              `Webhook to ${url} responded with HTTP ${response.status}`,
+            );
+          }
+
           this.logger.log(
-            `📧 Sending Email to: ${node.config.recipient || 'default@test.com'}`,
+            `✅ Webhook succeeded: HTTP ${response.status} in ${webhookDurationMs}ms`,
           );
+          resultPayload = {
+            url,
+            method,
+            httpStatus: response.status,
+            durationMs: webhookDurationMs,
+          };
           break;
-        case NodeType.WEBHOOK:
-          this.logger.log(`Webhook node triggered.`);
-          break;
+        }
 
         default:
           this.logger.warn(`Unknown node type: ${node.type}`);
@@ -142,11 +213,10 @@ export class NodeProcessor extends WorkerHost {
 
       durationMs = Date.now() - startTime;
 
-      // mark as success if nothing crashed
       await this.logsRepo.update(log.id, {
         status: 'SUCCESS',
         completed_at: new Date(),
-        result_payload: { message: 'Node executed perfectly' },
+        result_payload: resultPayload as any,
       });
 
       const workflowEdges = await this.edgesRepo.find({
@@ -159,9 +229,18 @@ export class NodeProcessor extends WorkerHost {
         sourceHandle,
       );
 
-      // 4. Dispatch the next nodes into the queue
+      // Merge this node's output into the payload so downstream nodes can use it.
+      // The original webhook data is always preserved; node outputs are added under
+      // their node id key to avoid accidental collisions, e.g.:
+      //   { amount: 150, "node-condition": { conditionMet: true, branch: "true" } }
+      const nextPayload = {
+        ...inputPayload,
+        [node.id]: resultPayload,
+      };
+
+      // Dispatch the next nodes into the queue.
+      // If the CURRENT node is a DELAY, tell BullMQ to hold the next jobs.
       for (const nextNodeId of nextNodeIds) {
-        // If the CURRENT node was a delay, we tell BullMQ to delay the NEXT jobs
         let delayMs = 0;
         if (node.type === NodeType.DELAY && node.config.delay_ms) {
           delayMs = Number(node.config.delay_ms);
@@ -170,12 +249,11 @@ export class NodeProcessor extends WorkerHost {
         await this.executionsService.dispatchNode(
           nextNodeId,
           workflowId,
-          inputPayload,
+          nextPayload,
           delayMs,
         );
       }
 
-      // save SUCCESS to db
       this.gateway.broadcastNodeStatus(
         workflowId,
         nodeId,
@@ -184,7 +262,6 @@ export class NodeProcessor extends WorkerHost {
       );
       return { success: true };
     } catch (error: any) {
-      // why did the workflow stop?
       this.logger.error(`Node ${nodeId} failed: ${error.message}`);
 
       await this.logsRepo.update(log.id, {
@@ -192,8 +269,8 @@ export class NodeProcessor extends WorkerHost {
         completed_at: new Date(),
         error_message: error.message,
       });
+
       durationMs = Date.now() - startTime;
-      // save FAILED to db
       this.gateway.broadcastNodeStatus(
         workflowId,
         nodeId,

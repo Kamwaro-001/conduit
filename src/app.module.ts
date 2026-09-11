@@ -7,6 +7,7 @@ import { ExecutionsModule } from './executions/executions.module.js';
 import { BullModule } from '@nestjs/bullmq';
 import { UsersModule } from './users/users.module.js';
 import { AuthModule } from './auth/auth.module.js';
+import { TelemetryGateway } from './telemetry/telemetry.gateway.js';
 
 @Module({
   imports: [
@@ -26,12 +27,15 @@ import { AuthModule } from './auth/auth.module.js';
         port: 6379,
       },
     }),
+    BullModule.registerQueue({
+      name: 'workflow-execution',
+    }),
     UsersModule,
     AuthModule,
     WorkflowsModule,
     ExecutionsModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, TelemetryGateway],
 })
 export class AppModule {}
