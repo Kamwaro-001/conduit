@@ -10,6 +10,7 @@ export enum NodeType {
   WEBHOOK = 'WEBHOOK',
   HTTP_FETCH = 'HTTP_FETCH',
   VISION = 'VISION',
+  REGEX = 'REGEX',
 }
 
 @Entity('nodes')
