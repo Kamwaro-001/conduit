@@ -15,6 +15,19 @@ import { ExecutionLog } from './entities/execution-log.entity.js';
 import { ExecutionsGateway } from './executions.gateway.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { MailService } from '../mail/mail.service.js';
+import { SchedulerService } from './scheduler.service.js';
+import { NodeExecutorService } from './node-executor.service.js';
+import {
+  TriggerHandler,
+  ScheduleHandler,
+  DelayHandler,
+  ConditionHandler,
+  EmailHandler,
+  WebhookHandler,
+  HttpFetchHandler,
+  VisionHandler,
+  RegexHandler,
+} from './handlers/index.js';
 
 @Module({
   imports: [
@@ -30,9 +43,20 @@ import { MailService } from '../mail/mail.service.js';
     ExecutionsService,
     GraphTraversalService,
     NodeProcessor,
+    RegexHandler,
+    NodeExecutorService,
+    TriggerHandler,
+    ScheduleHandler,
+    DelayHandler,
+    ConditionHandler,
+    EmailHandler,
+    WebhookHandler,
+    HttpFetchHandler,
+    VisionHandler,
     ExecutionsGateway,
     MailService,
+    SchedulerService,
   ],
-  exports: [ExecutionsService],
+  exports: [ExecutionsService, SchedulerService],
 })
 export class ExecutionsModule {}

@@ -2,14 +2,14 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Job } from 'bullmq';
-import { Node, NodeType } from '../workflows/entities/node.entity.js';
 import { Repository } from 'typeorm';
-import { GraphTraversalService } from './graph-traversal.service.js';
-import { ExecutionsService } from './executions.service.js';
+import { Node } from '../workflows/entities/node.entity.js';
 import { Edge } from '../workflows/entities/edge.entity.js';
 import { ExecutionLog } from './entities/execution-log.entity.js';
+import { GraphTraversalService } from './graph-traversal.service.js';
+import { ExecutionsService } from './executions.service.js';
 import { ExecutionsGateway } from './executions.gateway.js';
-import { MailService } from '../mail/mail.service.js';
+import { NodeExecutorService } from './node-executor.service.js';
 
 // the worker - listens to Redis, grabs the jobs, executes the actual work.
 @Processor('node-execution')
@@ -24,18 +24,17 @@ export class NodeProcessor extends WorkerHost {
     private readonly traversalService: GraphTraversalService,
     private readonly executionsService: ExecutionsService,
     private readonly gateway: ExecutionsGateway,
-    private readonly mailService: MailService,
+    private readonly nodeExecutor: NodeExecutorService,
   ) {
     super();
   }
 
   /*
    * BullMQ automatically calls this method whenever a job hits the queue.
-   * Process: fetch node from db for type and config,
-   * run the task, e.g send email, wait, check condition, etc.
-   * Use GraphTraversalService to find the next nodes, and call dispatchNode() for the next steps.
+   * Process: fetch node from db, delegate execution to NodeExecutorService,
+   * record execution logs and gateway broadcasts,
+   * and dispatch next nodes via GraphTraversalService.
    */
-
   async process(job: Job): Promise<any> {
     const { nodeId, workflowId, inputPayload } = job.data;
 
@@ -60,156 +59,8 @@ export class NodeProcessor extends WorkerHost {
 
       this.logger.log(`[EXECUTING] Node: ${node.type} | ID: ${nodeId}`);
 
-      let sourceHandle: string | undefined = undefined;
-      let resultPayload: Record<string, unknown> = {};
-
-      // execute logic based on Node type.
-      switch (node.type) {
-        case NodeType.TRIGGER: {
-          this.logger.log(`Trigger node started execution.`);
-          resultPayload = {
-            triggered_at: new Date().toISOString(),
-            payload_keys: inputPayload ? Object.keys(inputPayload) : [],
-          };
-          break;
-        }
-
-        case NodeType.CONDITION: {
-          const rules = node.config.rules || [];
-          const matchType = node.config.matchType || 'AND';
-
-          let conditionMet = false;
-
-          if (rules.length === 0) {
-            // Default to true if no rules are defined
-            conditionMet = true;
-          } else {
-            const evaluations = rules.map((rule: any) => {
-              // Clean the field name (remove "payload." if the user typed it)
-              const fieldName = rule.field.replace(/^payload\./, '');
-              const actualValue = inputPayload
-                ? inputPayload[fieldName]
-                : undefined;
-
-              // Coerce the rule value to a number if possible for accurate >= comparisons
-              const expectedValue = isNaN(Number(rule.value))
-                ? rule.value
-                : Number(rule.value);
-
-              switch (rule.operator) {
-                case '>=':
-                  return Number(actualValue) >= Number(expectedValue);
-                case '==':
-                  // Using loose equality so 100 == "100" evaluates correctly from text inputs
-                  return actualValue == expectedValue;
-                case '!=':
-                  return actualValue != expectedValue;
-                case 'contains':
-                  return String(actualValue)
-                    .toLowerCase()
-                    .includes(String(expectedValue).toLowerCase());
-                default:
-                  return false;
-              }
-            });
-
-            if (matchType === 'AND') {
-              conditionMet = evaluations.every((res: boolean) => res === true);
-            } else if (matchType === 'OR') {
-              conditionMet = evaluations.some((res: boolean) => res === true);
-            }
-          }
-
-          sourceHandle = conditionMet ? 'true' : 'false';
-          this.logger.log(
-            `Condition evaluated to: ${sourceHandle} (Match: ${matchType}, Rules: ${rules.length})`,
-          );
-          resultPayload = {
-            conditionMet,
-            matchType,
-            rulesEvaluated: rules.length,
-            branch: sourceHandle,
-          };
-          break;
-        }
-
-        case NodeType.DELAY: {
-          const delayMs = Number(node.config.delay_ms ?? 0);
-          this.logger.log(
-            `⏳ Delay node reached. Next nodes will be queued with ${delayMs}ms delay.`,
-          );
-          resultPayload = { delayed_ms: delayMs };
-          break;
-        }
-
-        case NodeType.EMAIL: {
-          const recipient: string =
-            node.config.recipient || 'default@example.com';
-          const subject: string =
-            node.config.subject || 'Notification from Conduit';
-          const body: string =
-            node.config.body ||
-            `<p>This email was triggered by your Conduit workflow.</p>`;
-
-          this.logger.log(`Sending email to: ${recipient}`);
-
-          const { messageId } = await this.mailService.sendEmail({
-            to: recipient,
-            subject,
-            html: body,
-          });
-
-          this.logger.log(`Email delivered | messageId: ${messageId}`);
-          resultPayload = { recipient, subject, messageId };
-          break;
-        }
-
-        case NodeType.WEBHOOK: {
-          const url: string = node.config.url;
-          if (!url) throw new Error('WEBHOOK node is missing config.url');
-
-          const method: string = (node.config.method ?? 'POST').toUpperCase();
-          const customHeaders: Record<string, string> =
-            node.config.headers ?? {};
-
-          this.logger.log(`Outbound webhook: ${method} ${url}`);
-
-          const webhookStart = Date.now();
-          const response = await fetch(url, {
-            method,
-            headers: {
-              'Content-Type': 'application/json',
-              ...customHeaders,
-            },
-            // Only attach a body for methods that support it
-            ...(method !== 'GET' && method !== 'HEAD'
-              ? { body: JSON.stringify(inputPayload) }
-              : {}),
-          });
-
-          const webhookDurationMs = Date.now() - webhookStart;
-
-          if (!response.ok) {
-            throw new Error(
-              `Webhook to ${url} responded with HTTP ${response.status}`,
-            );
-          }
-
-          this.logger.log(
-            `✅ Webhook succeeded: HTTP ${response.status} in ${webhookDurationMs}ms`,
-          );
-          resultPayload = {
-            url,
-            method,
-            httpStatus: response.status,
-            durationMs: webhookDurationMs,
-          };
-          break;
-        }
-
-        default:
-          this.logger.warn(`Unknown node type: ${node.type}`);
-      }
+      const { resultPayload, sourceHandle, delayMs } =
+        await this.nodeExecutor.execute(node, inputPayload);
 
       durationMs = Date.now() - startTime;
 
@@ -239,18 +90,14 @@ export class NodeProcessor extends WorkerHost {
       };
 
       // Dispatch the next nodes into the queue.
-      // If the CURRENT node is a DELAY, tell BullMQ to hold the next jobs.
+      // If the CURRENT node configured a delay (e.g. DELAY node), hold the next jobs.
+      const downstreamDelay = delayMs ?? 0;
       for (const nextNodeId of nextNodeIds) {
-        let delayMs = 0;
-        if (node.type === NodeType.DELAY && node.config.delay_ms) {
-          delayMs = Number(node.config.delay_ms);
-        }
-
         await this.executionsService.dispatchNode(
           nextNodeId,
           workflowId,
           nextPayload,
-          delayMs,
+          downstreamDelay,
         );
       }
 
