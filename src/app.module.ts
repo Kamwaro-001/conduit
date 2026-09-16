@@ -13,18 +13,18 @@ import { TelemetryGateway } from './telemetry/telemetry.gateway.js';
   imports: [
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: 'localhost',
-      port: 5436,
-      username: 'job',
-      password: 'protection',
-      database: 'conduit-db',
+      host: process.env.DB_HOST ?? 'localhost',
+      port: parseInt(process.env.DB_PORT ?? '5436', 10),
+      username: process.env.DB_USERNAME ?? 'job',
+      password: process.env.DB_PASSWORD ?? 'protection',
+      database: process.env.DB_DATABASE ?? 'conduit-db',
       autoLoadEntities: true,
-      synchronize: true,
+      synchronize: process.env.NODE_ENV !== 'production',
     }),
     BullModule.forRoot({
       connection: {
-        host: 'localhost',
-        port: 6379,
+        host: process.env.REDIS_HOST ?? 'localhost',
+        port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
       },
     }),
     BullModule.registerQueue({

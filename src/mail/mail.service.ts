@@ -20,8 +20,7 @@ export class MailService {
 
   constructor() {
     this.resend = new Resend(process.env.RESEND_API_KEY);
-    this.defaultFrom =
-      process.env.MAIL_FROM ?? 'Conduit <noreply@conduit.kamwaro.dev>';
+    this.defaultFrom = process.env.MAIL_FROM ?? '';
   }
 
   async sendEmail(options: SendEmailOptions): Promise<SendEmailResult> {
