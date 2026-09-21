@@ -28,7 +28,9 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/conduit:latest
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/conduit:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/conduit:${{ github.sha }}
 
       - name: Log in to Azure
         uses: azure/login@v2
@@ -42,4 +44,4 @@ jobs:
         with:
           resourceGroup: conduit-rg
           containerAppName: conduit-app
-          imageToDeploy: ${{ secrets.DOCKERHUB_USERNAME }}/conduit:latest
+          imageToDeploy: ${{ secrets.DOCKERHUB_USERNAME }}/conduit:${{ github.sha }}
