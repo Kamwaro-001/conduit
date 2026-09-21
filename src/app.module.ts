@@ -19,7 +19,7 @@ import { TelemetryGateway } from './telemetry/telemetry.gateway.js';
       password: process.env.DB_PASSWORD ?? 'protection',
       database: process.env.DB_DATABASE ?? 'conduit-db',
       autoLoadEntities: true,
-      synchronize: process.env.NODE_ENV !== 'production',
+      synchronize: false,
     }),
     BullModule.forRoot({
       connection: {
