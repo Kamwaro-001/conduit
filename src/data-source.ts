@@ -8,6 +8,7 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USERNAME ?? 'job',
   password: process.env.DB_PASSWORD ?? 'protection',
   database: process.env.DB_DATABASE ?? 'conduit-db',
+  ssl: process.env.DB_SSL === 'false' ? false : true,
   synchronize: false,
   logging: false,
   entities: ['dist/**/*.entity.js'],
