@@ -107,7 +107,6 @@ export class WorkflowsService {
       newEdges.length > 0 ? this.edgesRepo.save(newEdges) : Promise.resolve(),
     ]);
 
-    return this.findOne(id, userId);
     const updated = await this.findOne(id, userId);
 
     // Re-register schedules after sync in case cron expressions changed.

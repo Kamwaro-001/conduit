@@ -10,8 +10,8 @@ export class GraphTraversalService {
     return nodes.filter((node) => {
       const hasIncomingEdges = edges.some((edge) => edge.target === node.id);
 
-      // A true start node has no incoming lines AND is classified as a TRIGGER
-      return !hasIncomingEdges && node.type === NodeType.TRIGGER;
+      // A true start node has no incoming edges AND is a trigger-type node
+      return !hasIncomingEdges && (node.type === NodeType.TRIGGER || node.type === NodeType.SCHEDULE);
     });
   }
 
