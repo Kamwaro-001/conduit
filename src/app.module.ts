@@ -29,7 +29,7 @@ import { TelemetryGateway } from './telemetry/telemetry.gateway.js';
       },
     }),
     BullModule.registerQueue({
-      name: 'workflow-execution',
+      name: 'node-execution',
     }),
     UsersModule,
     AuthModule,

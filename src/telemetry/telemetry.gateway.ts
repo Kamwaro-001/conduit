@@ -15,7 +15,7 @@ export class TelemetryGateway implements OnGatewayInit {
   server: Server;
 
   constructor(
-    @InjectQueue('workflow-execution') private executionQueue: Queue,
+    @InjectQueue('node-execution') private executionQueue: Queue,
   ) {}
 
   afterInit() {

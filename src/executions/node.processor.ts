@@ -5,6 +5,7 @@ import { Job } from 'bullmq';
 import { Repository } from 'typeorm';
 import { Node } from '../workflows/entities/node.entity.js';
 import { Edge } from '../workflows/entities/edge.entity.js';
+import { Workflow } from '../workflows/entities/workflow.entity.js';
 import { ExecutionLog } from './entities/execution-log.entity.js';
 import { GraphTraversalService } from './graph-traversal.service.js';
 import { ExecutionsService } from './executions.service.js';
@@ -19,6 +20,8 @@ export class NodeProcessor extends WorkerHost {
   constructor(
     @InjectRepository(Node) private readonly nodesRepo: Repository<Node>,
     @InjectRepository(Edge) private readonly edgesRepo: Repository<Edge>,
+    @InjectRepository(Workflow)
+    private readonly workflowsRepo: Repository<Workflow>,
     @InjectRepository(ExecutionLog)
     private readonly logsRepo: Repository<ExecutionLog>,
     private readonly traversalService: GraphTraversalService,
@@ -38,24 +41,40 @@ export class NodeProcessor extends WorkerHost {
   async process(job: Job): Promise<any> {
     const { nodeId, workflowId, inputPayload } = job.data;
 
+    const startTime = Date.now();
+    let durationMs = 0;
+
+    const [workflow, node] = await Promise.all([
+      this.workflowsRepo.findOneBy({ id: workflowId }),
+      this.nodesRepo.findOneBy({ id: nodeId }),
+    ]);
+
+    if (!workflow) {
+      this.logger.error(`Workflow with id ${workflowId} not found`);
+      return;
+    }
+
+    if (workflow.status !== 'PUBLISHED') {
+      this.logger.warn(
+        `Skipping node ${nodeId}: workflow ${workflowId} is ${workflow.status}`,
+      );
+      return;
+    }
+
+    if (!node) {
+      this.logger.error(`Node with id ${nodeId} not found`);
+      return;
+    }
+
     const log = await this.logsRepo.save({
       workflow: { id: workflowId },
       node: { id: nodeId },
       status: 'RUNNING',
     });
 
-    const startTime = Date.now();
-    let durationMs = 0;
-
     this.gateway.broadcastNodeStatus(workflowId, nodeId, 'RUNNING', 0);
 
     try {
-      const node = await this.nodesRepo.findOneBy({ id: nodeId });
-
-      if (!node) {
-        this.logger.error(`Node with id ${nodeId} not found`);
-        return;
-      }
 
       this.logger.log(`[EXECUTING] Node: ${node.type} | ID: ${nodeId}`);
 

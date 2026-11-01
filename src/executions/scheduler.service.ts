@@ -87,6 +87,21 @@ export class SchedulerService
         this.logger.log(`Removed job scheduler: ${scheduler.id}`);
       }
     }
+
+    const queuedJobs = await this.nodeQueue.getJobs(
+      ['waiting', 'delayed', 'prioritized'],
+      0,
+      -1,
+    );
+
+    for (const job of queuedJobs) {
+      if (job.data?.workflowId !== workflowId || job.repeatJobKey) {
+        continue;
+      }
+
+      await job.remove();
+      this.logger.log(`Removed queued job ${job.id} for workflow ${workflowId}`);
+    }
   }
 
   private buildSchedulerId(workflowId: string, nodeId: string): string {
