@@ -111,6 +111,7 @@ export class WorkflowsService {
 
     // Re-register schedules after sync in case cron expressions changed.
     if (updated.status === WorkflowStatus.PUBLISHED) {
+      await this.schedulerService.deregisterAll(id);
       await this.schedulerService.register(updated);
     }
 

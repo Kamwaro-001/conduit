@@ -1,29 +1,24 @@
-import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { JobScheduler } from 'bullmq';
+import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
 import { Workflow } from '../workflows/entities/workflow.entity.js';
-import { Node, NodeType } from '../workflows/entities/node.entity.js';
+import { NodeType } from '../workflows/entities/node.entity.js';
 import { WorkflowStatus } from '../workflows/dto/update-workflow.dto.js';
 
 @Injectable()
 export class SchedulerService
-  implements OnApplicationBootstrap, OnApplicationShutdown
+  implements OnApplicationBootstrap
 {
   private readonly logger = new Logger(SchedulerService.name);
-  private readonly jobScheduler: JobScheduler;
 
   constructor(
     @InjectRepository(Workflow)
     private readonly workflowsRepo: Repository<Workflow>,
-  ) {
-    this.jobScheduler = new JobScheduler('node-execution', {
-      connection: {
-        host: process.env.REDIS_HOST ?? 'localhost',
-        port: Number(process.env.REDIS_PORT ?? 6379),
-      },
-    });
-  }
+    @InjectQueue('node-execution')
+    private readonly nodeQueue: Queue,
+  ) {}
 
   /**
    * On startup, re-register all published workflows that have SCHEDULE nodes.
@@ -42,10 +37,6 @@ export class SchedulerService
     this.logger.log(
       `Initialized schedules for ${publishedWorkflows.length} published workflow(s)`,
     );
-  }
-
-  async onApplicationShutdown() {
-    await this.jobScheduler.close();
   }
 
   /**
@@ -70,13 +61,13 @@ export class SchedulerService
 
       const schedulerId = this.buildSchedulerId(workflow.id, node.id);
 
-      await this.jobScheduler.upsertJobScheduler(
+      await this.nodeQueue.upsertJobScheduler(
         schedulerId,
         { pattern: cron, tz },
-        'execute-node',
-        { nodeId: node.id, workflowId: workflow.id, inputPayload: {} },
-        {},
-        { override: true },
+        {
+          name: 'execute-node',
+          data: { nodeId: node.id, workflowId: workflow.id, inputPayload: {} },
+        },
       );
 
       this.logger.log(
@@ -89,10 +80,10 @@ export class SchedulerService
    * Remove all scheduled jobs for a given workflow.
    */
   async deregisterAll(workflowId: string): Promise<void> {
-    const schedulers = await this.jobScheduler.getJobSchedulers(0, 100);
+    const schedulers = await this.nodeQueue.getJobSchedulers(0, -1);
     for (const scheduler of schedulers) {
       if (scheduler.id?.startsWith(`schedule:${workflowId}:`)) {
-        await this.jobScheduler.removeJobScheduler(scheduler.id!);
+        await this.nodeQueue.removeJobScheduler(scheduler.id);
         this.logger.log(`Removed job scheduler: ${scheduler.id}`);
       }
     }

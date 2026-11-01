@@ -10,7 +10,7 @@ export class ScheduleHandler implements NodeHandler {
   private readonly logger = new Logger(ScheduleHandler.name);
 
   async execute(
-    node: Node,
+    _node: Node,
     inputPayload: Record<string, any>,
   ): Promise<NodeExecutionResult> {
     // Entry point for cron-triggered workflows. Behaves like TRIGGER.
@@ -20,6 +20,7 @@ export class ScheduleHandler implements NodeHandler {
       resultPayload: {
         triggered_at: new Date().toISOString(),
         source: 'schedule',
+        payload_keys: inputPayload ? Object.keys(inputPayload) : [],
       },
     };
   }
