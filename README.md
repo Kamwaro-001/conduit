@@ -17,7 +17,7 @@ Conduit is a node-based workflow automation platform backend built with NestJS. 
 
 - Node.js
 - PostgreSQL
-- Redis
+- Redis, or an Upstash Redis database
 
 ## Setup
 
@@ -38,6 +38,11 @@ cp .env.example .env
 ```bash
 npm run start:dev
 ```
+
+For production with Upstash, set `UPSTASH_REDIS_REST_URL` and
+`UPSTASH_REDIS_REST_TOKEN` in `.env`. BullMQ connects to the Upstash Redis
+endpoint over TLS; `REDIS_URL` may be used instead when the Redis connection
+URL is available.
 
 ## Available Scripts
 
